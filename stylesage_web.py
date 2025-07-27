@@ -1,83 +1,86 @@
-# stylesage_web.py - Streamlit version (no Tkinter)
 import streamlit as st
 from PIL import Image
 import numpy as np
-import os
 import random
-from datetime import datetime
+import io
 
-st.set_page_config(page_title="StyleSage", layout="centered")
-st.title("👗 StyleSage - AI Fashion Stylist")
+st.set_page_config(page_title="AI Outfit Recommender", layout="wide")
 
-# --- Setup
+st.title("🧥 AI Outfit Recommender")
+st.caption("Upload your wardrobe and get outfit suggestions powered by basic color matching!")
+
+# Initialize storage
+if "uploaded_images" not in st.session_state:
+    st.session_state.uploaded_images = {}
+
+# Categories
 categories = ["Topwear", "Bottomwear", "Outerwear", "Footwear"]
-uploaded_images = {}
 
-# --- Upload section
-st.subheader("📤 Upload Your Outfit Items")
-
+# Upload section (with multiple file support)
+st.subheader("👕 Upload Your Wardrobe")
 for category in categories:
-    uploaded = st.file_uploader(f"Upload {category} Image", type=["jpg", "jpeg", "png"], key=category)
-    if uploaded:
-        image = Image.open(uploaded).resize((160, 160))
-        uploaded_images[category] = {
-            "image": image,
-            "avg_color": np.mean(np.array(image.resize((40, 40))).reshape(-1, 3), axis=0),
-            "filename": uploaded.name
-        }
+    uploaded_files = st.file_uploader(
+        f"Upload {category} Images", type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True, key=category
+    )
+    if uploaded_files:
+        st.session_state.uploaded_images[category] = []
+        for uploaded in uploaded_files[:10]:  # Limit to 10 images per category
+            image = Image.open(uploaded).resize((160, 160))
+            avg_color = np.mean(np.array(image.resize((40, 40))).reshape(-1, 3), axis=0)
+            st.session_state.uploaded_images[category].append({
+                "image": image,
+                "avg_color": avg_color,
+                "filename": uploaded.name
+            })
 
-# --- AI Matching Logic
-def color_score(color1, color2):
-    diff = np.linalg.norm(np.array(color1) - np.array(color2))
-    return 100 - min(diff, 100)
+# Color scoring function
+def color_score(c1, c2):
+    dist = np.linalg.norm(np.array(c1) - np.array(c2))
+    score = 100 - min(dist / 4.5, 100)
+    return score
 
+# Outfit suggestion function
 def generate_recommendation():
-    score = None
-    comment = ""
-    
+    uploaded_images = st.session_state.uploaded_images
     if "Topwear" in uploaded_images and "Bottomwear" in uploaded_images:
-        c1 = uploaded_images["Topwear"]["avg_color"]
-        c2 = uploaded_images["Bottomwear"]["avg_color"]
-        score = int(color_score(c1, c2))
+        top = random.choice(uploaded_images["Topwear"])
+        bottom = random.choice(uploaded_images["Bottomwear"])
+        score = int(color_score(top["avg_color"], bottom["avg_color"]))
         comment = "🔥 Perfectly Layered!" if score > 70 else "💡 Try Bolder Contrast"
-    return score, comment
+        return top, bottom, score, comment
+    return None, None, None, "Upload at least Topwear and Bottomwear."
 
-# --- Suggest Outfit
+# Suggest outfit
 if st.button("👕 Suggest Outfit"):
-    if "Topwear" in uploaded_images and "Bottomwear" in uploaded_images:
-        st.subheader("🧠 AI Suggested Outfit")
-        cols = st.columns(len(uploaded_images))
-        for i, (cat, data) in enumerate(uploaded_images.items()):
-            with cols[i]:
-                st.image(data["image"], caption=cat, use_column_width=True)
+    top, bottom, score, comment = generate_recommendation()
 
-        score, comment = generate_recommendation()
+    if top and bottom:
+        st.subheader("🎽 Your Suggested Outfit")
+        cols = st.columns(4)
+
+        cols[0].image(top["image"], caption="Topwear", use_column_width=True)
+        cols[1].image(bottom["image"], caption="Bottomwear", use_column_width=True)
+
+        if "Outerwear" in st.session_state.uploaded_images:
+            outer_list = st.session_state.uploaded_images["Outerwear"]
+            if outer_list:
+                outer = random.choice(outer_list)
+                cols[2].image(outer["image"], caption="Outerwear", use_column_width=True)
+
+        if "Footwear" in st.session_state.uploaded_images:
+            foot_list = st.session_state.uploaded_images["Footwear"]
+            if foot_list:
+                foot = random.choice(foot_list)
+                cols[3].image(foot["image"], caption="Footwear", use_column_width=True)
+
         st.markdown(f"### 🎯 AI Match Score: **{score}%**")
         st.info(comment)
     else:
-        st.warning("Please upload at least **Topwear and Bottomwear** to get a suggestion.")
+        st.warning("Upload both Topwear and Bottomwear to get an outfit suggestion.")
 
-# --- Save Outfit
-if st.button("💾 Save Outfit Info"):
-    if uploaded_images:
-        os.makedirs("saved_outfits", exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"outfit_{timestamp}.txt"
-        with open(os.path.join("saved_outfits", filename), "w") as f:
-            for cat, data in uploaded_images.items():
-                f.write(f"{cat}: {data['filename']}\n")
-        st.success(f"Outfit info saved as `{filename}`")
-    else:
-        st.warning("No outfit uploaded to save!")
-
-# --- Feedback Section
-st.markdown("---")
-st.subheader("📝 Give Feedback")
-feedback = st.text_area("Tell us how this AI stylist feels or what you'd like to see improved:")
-
-if st.button("📬 Submit Feedback"):
-    os.makedirs("feedback", exist_ok=True)
-    with open("feedback/user_feedback.txt", "a") as f:
-        f.write(f"{datetime.now()} - {feedback}\n")
+# Optional: Feedback
+st.subheader("💬 Your Feedback")
+feedback = st.text_area("What do you think of this outfit?", height=100)
+if st.button("📤 Submit Feedback"):
     st.success("Thanks for your feedback!")
-
